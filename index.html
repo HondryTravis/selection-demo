@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style>
+        #editor-wrapper {
+            padding: 40px;
+        }
+        span.Selected {
+            background-color: red;
+        }
+    </style>
+</head>
+<body>
+    <h1>Selection Demo</h1>
+    <div id="editor-wrapper"  contenteditable="true">
+        <p>附件爱<span style="font-weight: bold;">迪生开发撒放假卡了撒</span>就发拉克丝的接发撒发<span>&nbsp;</span></p>
+        <p>附件爱迪生开发撒放假卡了撒就发拉克丝的接发撒发</p>
+        <p>附件爱迪生开发撒<span style="font-weight: bold;">放假卡了</span>撒就发拉克丝的接发撒发<span>&nbsp;</span></p>
+    </div>
+</body>
+
+<script type="module">
+
+import { getAllEffectivelyContainedNodes, getNodeLength, isContainedNode, getKeysOf } from './index.js'
+
+// 实现步骤
+const { ownDoc, ownWin, options: { selector } } = {
+        ownDoc: document,
+        ownWin: document.defaultView,
+        options: { selector: '#editor-wrapper' },
+    }
+
+const proxyNode = ownDoc.querySelector(selector)
+
+const { tag, props } = {
+    tag: 'span',
+    props: {
+        class: 'Selected'
+    }
+}
+const cache = { selected: [] }
+
+const getSelection = () => {
+    return ownWin.getSelection() || ownDoc.getSelection()
+}
+
+const getActiveRange = () => {
+    if (cache.activeRange) cache.oldRange = cache.activeRange
+
+    const activeSelection = getSelection()
+
+    return activeSelection.rangeCount > 0
+        && (cache.activeRange = activeSelection.getRangeAt(0))
+        || cache.activeRange
+
+}
+
+// 修复选区
+const correctRange = (range) => {
+
+    cache.oldRange = range.cloneRange()
+
+    // 修正开始节点是 Text 节点时候，要对文字进行断开处理
+    if (range.startContainer.nodeType === Node.TEXT_NODE
+    && range.startOffset !== 0
+    && range.startOffset !== getNodeLength(range.startContainer)) {
+        const newActiveRange = ownDoc.createRange()
+        let newNode;
+        if (range.startContainer.isEqualNode(range.endContainer)) {
+            let newEndOffset = range.endOffset - range.startOffset;
+
+            newNode = (range.startContainer).splitText(range.startOffset);
+            newActiveRange.setEnd(newNode, newEndOffset);
+
+            range.setEnd(newNode, newEndOffset);
+        } else {
+            newNode = (range.startContainer).splitText(range.startOffset);
+        }
+
+        newActiveRange.setStart(newNode, 0);
+        getSelection().removeAllRanges();
+        getSelection().addRange(newActiveRange);
+
+        getActiveRange().setStart(newNode, 0);
+    }
+
+    // 修正结尾节点是 Text 节点时候，要对文字进行断开处理
+    if (range.endContainer.nodeType === Node.TEXT_NODE
+    && range.endOffset !== 0
+    && range.endOffset !== getNodeLength(range.endContainer)) {
+        // 上边已经修正过了
+        const activeRange = range;
+        const newStart = [activeRange.startContainer, activeRange.startOffset];
+        const newEnd = [activeRange.endContainer, activeRange.endOffset];
+
+        (activeRange.endContainer).splitText(activeRange.endOffset);
+        activeRange.setStart(newStart[0], newStart[1]);
+        activeRange.setEnd(newEnd[0], newEnd[1]);
+
+        getSelection().removeAllRanges();
+        getSelection().addRange(activeRange);
+    }
+}
+
+// 移除标记
+const removeMark = () => {
+    while (cache.selected.length) {
+        console.log('removeMark')
+        const node = cache.selected.shift();
+        const parentNode = node.parentNode;
+        const child = node.childNodes[0]
+        parentNode.insertBefore(child, node)
+        node.remove()
+        parentNode.normalize()
+    }
+}
+// 标记选区
+const mark = () => {
+    correctRange(getActiveRange())
+
+    const texts = getAllEffectivelyContainedNodes(getActiveRange() ,function(node) {
+        return node.nodeType == Node.TEXT_NODE
+    })
+
+    if (!texts.every( node => isContainedNode(proxyNode, node))) return false
+
+    for (const text of texts) {
+        const textParent = text.parentNode
+        const node = ownDoc.createElement(tag)
+
+        if (getKeysOf(props).length) {
+            for (const key in props) node.setAttribute(key, props[key])
+        }
+        textParent.insertBefore(node, text)
+        node.appendChild(text)
+        cache.selected.push(node)
+    }
+    if (!cache.selected.length) return false
+
+    const activeRange = getActiveRange();
+    const cacheLen = cache.selected.length
+    const [ start, end ] = [ cache.selected[0], cache.selected[cacheLen - 1] ]
+
+
+    activeRange.setStart(start, 0)
+    activeRange.setEnd(end, end.childNodes.length)
+
+    getSelection().removeAllRanges();
+    getSelection().addRange(activeRange);
+}
+
+const setup = () => {
+    const markSelection = function(evt) {
+        mark()
+    }
+
+    const removeMarkInSelection = function(evt) {
+        const oldSelection = getSelection()
+        if (oldSelection.isCollapsed == false) oldSelection.collapseToEnd()
+        removeMark()
+    }
+
+    proxyNode.addEventListener('mouseup', markSelection)
+    proxyNode.addEventListener('mousedown', removeMarkInSelection)
+}
+
+setup()
+
+</script>
+</html>
